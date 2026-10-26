@@ -1,0 +1,102 @@
+# Elecrow CrowPanel Advanced 9.0" (HW V1.1 / V1.2): ESP32-P4 + ESP32-C6, 1024 x 600 MIPI-DSI.
+# Display, touch, backlight and Wi-Fi. Audio is in audio.yaml.
+
+# The P4 chip revision decides the build: rev 3 and later are production chips, older ones
+# are engineering samples, and an image for the wrong one does not boot. Read the revision
+# with esptool before the first flash (README, "Chip revision").
+substitutions:
+  engineering_sample: "false"
+
+esp32:
+  variant: esp32p4
+  engineering_sample: ${engineering_sample}
+  cpu_frequency: 360MHz  # 400 MHz is experimental in ESPHome 2026.10 (esphome#13425)
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+    advanced:
+      execute_from_psram: true
+    sdkconfig_options:
+      # esp_hosted allocates its SDIO buffers before the scheduler starts, from the
+      # ~147 KB early heap of a rev <3 P4. In internal RAM they leave too little for the
+      # FreeRTOS timer task, and a larger build aborts on every boot. P4 DMA reaches
+      # PSRAM, so they go there.
+      CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM: y
+
+# Logs go out on J1, the USB-C port with the CH340 bridge.
+logger:
+  hardware_uart: UART0
+
+psram:
+  mode: hex
+  speed: 200MHz
+
+# Powers the MIPI-DSI PHY.
+esp_ldo:
+  - channel: 3
+    voltage: 2.5V
+
+# Wi-Fi and BLE through the C6 over SDIO, with the C6's stock firmware.
+# HW V1.1 and V1.2 wire D0-D3 the reverse way round from V1.0 (D0 = GPIO17).
+# Elecrow's own ESPHome example still has the V1.0 order and boot-loops on newer boards.
+# On a V1.0 board: d0 GPIO14, d1 GPIO15, d2 GPIO16, d3 GPIO17.
+esp32_hosted:
+  variant: esp32c6
+  active_high: true
+  reset_pin: GPIO32
+  cmd_pin: GPIO19
+  clk_pin: GPIO18
+  d0_pin: GPIO17
+  d1_pin: GPIO16
+  d2_pin: GPIO15
+  d3_pin: GPIO14
+
+i2c:
+  - id: bus_a
+    sda: GPIO45
+    scl: GPIO46
+    frequency: 400kHz
+
+output:
+  # Backlight supply switch: high is on.
+  - platform: gpio
+    id: backlight_power
+    pin: GPIO29
+  - platform: ledc
+    id: backlight_pwm
+    pin: GPIO31
+    frequency: 30kHz  # from Elecrow's IDF sample; no audible whine
+
+light:
+  - platform: monochromatic
+    id: backlight
+    name: Display Backlight
+    output: backlight_pwm
+    restore_mode: ALWAYS_ON
+    default_transition_length: 250ms
+    on_turn_on:
+      - output.turn_on: backlight_power
+    on_turn_off:
+      - output.turn_off: backlight_power
+
+# ESPHome 2026.10 has no Elecrow model. The Waveshare 7B uses the same EK79007 1024 x 600
+# panel and its timings work here.
+display:
+  - platform: mipi_dsi
+    id: main_display
+    model: WAVESHARE-ESP32-P4-WIFI6-TOUCH-LCD-7B
+    reset_pin: GPIO41
+    dimensions:
+      width: 1024
+      height: 600
+    color_order: RGB
+    update_interval: never
+    auto_clear_enabled: false
+
+touchscreen:
+  - platform: gt911
+    id: main_touch
+    i2c_id: bus_a
+    display: main_display
+    reset_pin: GPIO40
+    interrupt_pin: GPIO42

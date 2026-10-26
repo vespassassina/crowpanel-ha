@@ -1,0 +1,48 @@
+# The packages without a dashboard: a blank screen, the speaker, the mic and the voice
+# satellite. A starting point for your own UI. Build from the repository root:
+#   esphome compile examples/minimal.yaml
+
+substitutions:
+  engineering_sample: "false"
+
+packages:
+  hardware: !include ../packages/hardware.yaml
+  audio: !include ../packages/audio.yaml
+  voice: !include ../packages/voice.yaml
+  diagnostics: !include ../packages/diagnostics.yaml
+
+esphome:
+  name: crowpanel-minimal
+  friendly_name: CrowPanel Minimal
+  min_version: 2026.10.0
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ap:
+    password: !secret fallback_password
+
+captive_portal:
+
+improv_serial:
+
+# The voice package calls this on every change of phase or mute.
+script:
+  - id: voice_ui
+    then:
+      - logger.log:
+          format: "voice phase %d, mute %d"
+          args: [id(voice_phase), id(mute).state]
+
+# A screen with nothing on it, so the display has something to draw.
+lvgl:
+  displays: main_display
+  touchscreens: main_touch
+  widgets:
+    - label: { align: CENTER, text: "CrowPanel" }

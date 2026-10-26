@@ -1,0 +1,21 @@
+# Diagnostic entities in HA. The reset reason survives a reboot, so crashes show up.
+
+debug:
+  update_interval: 60s
+
+sensor:
+  - platform: uptime
+    name: Uptime
+  - platform: wifi_signal
+    name: Wi-Fi Signal
+    update_interval: 60s
+
+text_sensor:
+  - platform: version
+    name: Firmware
+  - platform: debug
+    reset_reason:
+      name: Reset Reason
+  - platform: wifi_info
+    ip_address:
+      name: IP Address

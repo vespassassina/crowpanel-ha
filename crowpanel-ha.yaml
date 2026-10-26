@@ -1,0 +1,483 @@
+# Example: Elecrow CrowPanel Advanced 9.0" as a Home Assistant wall panel and voice satellite.
+# Change the substitutions below to your own entities, then build. README has the steps.
+
+substitutions:
+  name: crowpanel-ha
+  friendly_name: CrowPanel
+  # "true" for an engineering-sample P4 (chip revision below v3.0). README, "Chip revision".
+  engineering_sample: "false"
+  # 0, 90, 180 or 270. 180 if the panel hangs upside down.
+  rotation: "0"
+  # Screen off after this long without a touch.
+  idle_timeout: 60s
+
+  weather_entity: weather.forecast_home
+  light_1: light.living_room
+  light_1_name: Living room
+  light_2: light.kitchen
+  light_2_name: Kitchen
+  light_3: light.hallway
+  light_3_name: Hallway
+  light_4: light.bedroom
+  light_4_name: Bedroom
+  climate: climate.living_room
+  climate_name: Living room
+  media: media_player.living_room
+  media_name: Living room
+
+packages:
+  hardware: !include packages/hardware.yaml
+  audio: !include packages/audio.yaml
+  voice: !include packages/voice.yaml
+  diagnostics: !include packages/diagnostics.yaml
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  min_version: 2026.10.0
+  includes:
+    - include/ui_write.h  # write-if-changed LVGL helpers against redraw flicker
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# No network in the file: set Wi-Fi once over USB with Improv (README, "First flash").
+# If Improv is not an option, add `ssid: !secret wifi_ssid` and `password: !secret wifi_password`.
+wifi:
+  ap:
+    ssid: ${friendly_name} Setup
+    password: !secret fallback_password
+
+captive_portal:
+
+improv_serial:
+
+time:
+  - platform: homeassistant
+    id: ha_time
+    on_time_sync:
+      - script.execute: update_clock
+    on_time:
+      - seconds: 0
+        then:
+          - script.execute: update_clock
+
+# Material Design Icons v7.4.47 (Pictogrammers Free License, fonts/). Montserrat only has the
+# FontAwesome subset, which has no weather icons.
+font:
+  - file: "gfonts://Montserrat@300"
+    id: clock_64
+    size: 64
+    bpp: 4
+    glyphs: "0123456789:-"
+  - file: fonts/materialdesignicons-webfont.ttf
+    id: mdi_24
+    size: 24
+    bpp: 4
+    glyphs:
+      - "\U000F0335"  # lightbulb
+      - "\U000F050F"  # thermometer
+      - "\U000F075A"  # music
+      - "\U000F036C"  # microphone
+      - "\U000F036D"  # microphone-off
+  - file: fonts/materialdesignicons-webfont.ttf
+    id: mdi_48
+    size: 48
+    bpp: 4
+    glyphs:
+      - "\U000F0599"  # weather-sunny
+      - "\U000F0594"  # weather-night
+      - "\U000F0595"  # weather-partly-cloudy
+      - "\U000F0590"  # weather-cloudy
+      - "\U000F0597"  # weather-rainy
+      - "\U000F0596"  # weather-pouring
+      - "\U000F0593"  # weather-lightning
+      - "\U000F067E"  # weather-lightning-rainy
+      - "\U000F0598"  # weather-snowy
+      - "\U000F067F"  # weather-snowy-rainy
+      - "\U000F0591"  # weather-fog
+      - "\U000F0592"  # weather-hail
+      - "\U000F059D"  # weather-windy
+      - "\U000F059E"  # weather-windy-variant
+      - "\U000F05D6"  # alert-circle-outline
+
+globals:
+  # The climate target the panel shows. Presses change it at once; HA gets one call
+  # 600 ms after the last press.
+  - { id: clim_target, type: float, initial_value: "NAN" }
+  - { id: clim_last_press, type: uint32_t, initial_value: "0" }
+
+# ---------------------------------------------------------------- Home Assistant state
+binary_sensor:
+  - { platform: homeassistant, id: l1_on, entity_id: "${light_1}", trigger_on_initial_state: true, on_state: { lvgl.widget.update: { id: btn_l1, state: { checked: !lambda return x; } } } }
+  - { platform: homeassistant, id: l2_on, entity_id: "${light_2}", trigger_on_initial_state: true, on_state: { lvgl.widget.update: { id: btn_l2, state: { checked: !lambda return x; } } } }
+  - { platform: homeassistant, id: l3_on, entity_id: "${light_3}", trigger_on_initial_state: true, on_state: { lvgl.widget.update: { id: btn_l3, state: { checked: !lambda return x; } } } }
+  - { platform: homeassistant, id: l4_on, entity_id: "${light_4}", trigger_on_initial_state: true, on_state: { lvgl.widget.update: { id: btn_l4, state: { checked: !lambda return x; } } } }
+
+sensor:
+  - platform: homeassistant
+    id: outside_temp
+    entity_id: ${weather_entity}
+    attribute: temperature
+    on_value:
+      - lambda: |-
+          char b[12]; snprintf(b, sizeof b, "%.0f\xC2\xB0", x);
+          ui_label_set_text(id(lbl_weather_temp), b);
+  - platform: homeassistant
+    id: clim_ha_target
+    entity_id: ${climate}
+    attribute: temperature
+    on_value:
+      # A press in the last 10 s wins over HA, so a late echo cannot undo it.
+      - lambda: |-
+          if (millis() - id(clim_last_press) > 10000 || isnan(id(clim_target))) id(clim_target) = x;
+      - script.execute: update_climate
+  - { platform: homeassistant, id: clim_current, entity_id: "${climate}", attribute: current_temperature, on_value: { script.execute: update_climate } }
+  - platform: homeassistant
+    id: media_volume
+    entity_id: ${media}
+    attribute: volume_level
+    on_value:
+      - lvgl.slider.update:
+          id: sld_volume
+          value: !lambda return x * 100;
+
+text_sensor:
+  - platform: homeassistant
+    id: weather_state
+    entity_id: ${weather_entity}
+    on_value:
+      - lambda: |-
+          struct W { const char *state; const char *glyph; uint32_t color; };
+          static const W map[] = {
+            {"sunny", "\U000F0599", 0xFFC94A}, {"clear-night", "\U000F0594", 0xB9C3FF},
+            {"partlycloudy", "\U000F0595", 0xFFD27A}, {"cloudy", "\U000F0590", 0xAFB7C8},
+            {"rainy", "\U000F0597", 0x5AA8FF}, {"pouring", "\U000F0596", 0x3D8BFF},
+            {"lightning", "\U000F0593", 0xFFE45A}, {"lightning-rainy", "\U000F067E", 0xFFE45A},
+            {"snowy", "\U000F0598", 0xE6F2FF}, {"snowy-rainy", "\U000F067F", 0xCFE3FF},
+            {"fog", "\U000F0591", 0x9AA3B5}, {"hail", "\U000F0592", 0xCFE3FF},
+            {"windy", "\U000F059D", 0x9FE3D0}, {"windy-variant", "\U000F059E", 0x9FE3D0}};
+          const char *glyph = "\U000F05D6"; uint32_t color = 0x8B91A3;
+          for (auto &w : map) if (x == w.state) { glyph = w.glyph; color = w.color; }
+          ui_label_set_text(id(ico_weather), glyph);
+          ui_set_text_color(id(ico_weather), lv_color_hex(color), 0);
+  - { platform: homeassistant, id: clim_action, entity_id: "${climate}", attribute: hvac_action, on_value: { script.execute: update_climate } }
+  - { platform: homeassistant, id: media_state, entity_id: "${media}", on_value: { script.execute: update_media } }
+  - { platform: homeassistant, id: media_title, entity_id: "${media}", attribute: media_title, on_value: { script.execute: update_media } }
+  - { platform: homeassistant, id: media_artist, entity_id: "${media}", attribute: media_artist, on_value: { script.execute: update_media } }
+
+# ---------------------------------------------------------------- scripts
+script:
+  - id: update_clock
+    then:
+      - lambda: |-
+          auto now = id(ha_time).now();
+          ui_label_set_text(id(lbl_clock), now.strftime("%H:%M").c_str());
+          ui_label_set_text(id(lbl_date), now.strftime("%A\n%d %B").c_str());
+
+  - id: update_climate
+    then:
+      - lambda: |-
+          char b[24];
+          if (isnan(id(clim_target))) ui_label_set_text(id(lbl_clim_target), "--");
+          else { snprintf(b, sizeof b, "%.1f\xC2\xB0", id(clim_target)); ui_label_set_text(id(lbl_clim_target), b); }
+          float now = id(clim_current).state;
+          if (isnan(now)) ui_label_set_text(id(lbl_clim_now), "");
+          else { snprintf(b, sizeof b, "Now %.1f\xC2\xB0", now); ui_label_set_text(id(lbl_clim_now), b); }
+          std::string a = id(clim_action).state;
+          if (!a.empty()) a[0] = toupper(a[0]);
+          ui_label_set_text(id(lbl_clim_action), a.c_str());
+          bool heating = id(clim_action).state == "heating";
+          ui_set_text_color(id(lbl_clim_target), lv_color_hex(heating ? 0xFF7A45 : 0xE8EAF0), 0);
+
+  # +/- step whole degrees: 19.5 goes to 20, then 21.
+  - id: climate_step
+    parameters:
+      dir: int
+    then:
+      - lambda: |-
+          float t = id(clim_target);
+          if (isnan(t)) return;
+          t = dir > 0 ? floorf(t) + 1 : ceilf(t) - 1;
+          id(clim_target) = std::max(5.0f, std::min(35.0f, t));
+          id(clim_last_press) = millis();
+      - script.execute: update_climate
+      - script.execute: climate_send
+
+  - id: climate_send
+    mode: restart
+    then:
+      - delay: 600ms
+      - homeassistant.action:
+          action: climate.set_temperature
+          data:
+            entity_id: ${climate}
+            temperature: !lambda 'char b[8]; snprintf(b, sizeof b, "%.1f", id(clim_target)); return std::string(b);'
+
+  - id: update_media
+    then:
+      - lambda: |-
+          const std::string &st = id(media_state).state;
+          bool playing = st == "playing";
+          bool off = st.empty() || st == "off" || st == "unavailable";
+          ui_label_set_text(id(lbl_media_title), off ? "Nothing playing" : id(media_title).state.c_str());
+          ui_label_set_text(id(lbl_media_artist), off ? "" : id(media_artist).state.c_str());
+          ui_label_set_text(id(lbl_play), playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
+
+  # Called by the voice package whenever the assistant's phase or the mute switch changes.
+  - id: voice_ui
+    then:
+      - if:
+          condition:
+            and:
+              - lambda: return id(voice_phase) > 0;
+              - lvgl.is_paused
+          then:
+            - lvgl.resume:
+            - lvgl.widget.redraw:
+      - lambda: |-
+          if (id(ico_voice) == nullptr) return;  // the mute switch restores before LVGL exists
+          static const char *const text[] = {"Ready", "Listening", "Thinking", "Speaking"};
+          static const uint32_t color[] = {0x8B91A3, 0x4CD98A, 0xFFB547, 0x9B8CFF};
+          bool muted = id(mute).state;
+          int p = std::max(0, std::min(3, id(voice_phase)));
+          ui_label_set_text(id(ico_voice), muted ? "\U000F036D" : "\U000F036C");
+          ui_label_set_text(id(lbl_voice), muted ? "Muted" : text[p]);
+          ui_set_text_color(id(ico_voice), lv_color_hex(muted ? 0xFF7A45 : color[p]), 0);
+
+# ---------------------------------------------------------------- touch and sleep
+touchscreen:
+  - id: !extend main_touch
+    on_release:
+      - if:
+          condition: lvgl.is_paused
+          then:
+            - lvgl.resume:
+            - lvgl.widget.redraw:
+            - light.turn_on: backlight
+
+# ---------------------------------------------------------------- UI, 1024 x 600
+lvgl:
+  id: lvgl_main
+  displays: main_display
+  touchscreens: main_touch
+  rotation: ${rotation}
+  on_idle:
+    timeout: ${idle_timeout}
+    then:
+      - light.turn_off: backlight
+      - lvgl.pause:
+
+  theme:
+    obj:
+      border_width: 0
+      scrollbar_mode: "OFF"
+    label:
+      text_color: 0xE8EAF0
+    button:
+      bg_color: 0xFFFFFF
+      bg_grad_color: 0xFFFFFF
+      bg_opa: 10%
+      radius: 14
+      shadow_width: 0
+      border_width: 0
+      pad_all: 0
+      text_color: 0xE8EAF0
+      checked:
+        bg_color: 0xFFB547
+        bg_grad_color: 0xFFB547
+        bg_opa: COVER
+        text_color: 0x0D0F14
+      pressed:
+        bg_color: 0xFFFFFF
+        bg_grad_color: 0xFFFFFF
+        bg_opa: 24%
+    slider:
+      bg_color: 0xFFFFFF
+      bg_opa: 8%
+      radius: 14
+      indicator:
+        bg_color: 0x9B8CFF
+        bg_opa: 70%
+        radius: 14
+      knob:
+        bg_opa: TRANSP
+        border_width: 0
+        shadow_width: 0
+        outline_width: 0
+        pad_all: 0
+
+  style_definitions:
+    - id: card
+      bg_color: 0x171A22
+      radius: 20
+      pad_all: 16
+      border_width: 0
+    - id: dim
+      text_color: 0x8B91A3
+    - id: chip
+      bg_color: 0x171A22
+      radius: 22
+      pad_all: 0
+      border_width: 0
+
+  pages:
+    - id: home
+      bg_color: 0x0D0F14
+      scrollable: false
+      widgets:
+        # ---------------- top bar
+        - label: { id: lbl_clock, x: 22, y: 10, text: "--:--", text_font: clock_64 }
+        - label: { id: lbl_date, x: 200, y: 22, text: "", text_font: montserrat_20, styles: dim }
+        # Tap to mute or unmute the wake word.
+        - obj:
+            styles: chip
+            clickable: true
+            on_short_click:
+              - switch.toggle: mute
+            x: 560
+            y: 26
+            width: 180
+            height: 44
+            scrollable: false
+            widgets:
+              - label: { id: ico_voice, x: 12, align: LEFT_MID, text: "\U000F036C", text_font: mdi_24, text_color: 0x8B91A3 }
+              - label: { id: lbl_voice, x: 44, align: LEFT_MID, text: "Ready", text_font: montserrat_18 }
+        - label: { id: ico_weather, x: 840, y: 20, text: "\U000F05D6", text_font: mdi_48, text_color: 0x8B91A3 }
+        - label: { id: lbl_weather_temp, x: -22, y: 26, align: TOP_RIGHT, text: "--", text_font: montserrat_32 }
+
+        # ---------------- lights
+        - obj:
+            styles: card
+            x: 16
+            y: 100
+            width: 320
+            height: 484
+            scrollable: false
+            widgets:
+              - label: { x: 0, y: 0, text: "\U000F0335", text_font: mdi_24, text_color: 0xFFB547 }
+              - label: { x: 32, y: 5, text: "LIGHTS", text_font: montserrat_14, text_color: 0xFFB547 }
+              # A tap toggles the light in HA; the button follows HA's state.
+              - button:
+                  id: btn_l1
+                  x: 0
+                  y: 44
+                  width: 288
+                  height: 96
+                  checkable: true
+                  widgets: [label: { x: 20, align: LEFT_MID, text: "${light_1_name}", text_font: montserrat_20 }]
+                  on_short_click: [homeassistant.action: { action: light.toggle, data: { entity_id: "${light_1}" } }]
+              - button:
+                  id: btn_l2
+                  x: 0
+                  y: 148
+                  width: 288
+                  height: 96
+                  checkable: true
+                  widgets: [label: { x: 20, align: LEFT_MID, text: "${light_2_name}", text_font: montserrat_20 }]
+                  on_short_click: [homeassistant.action: { action: light.toggle, data: { entity_id: "${light_2}" } }]
+              - button:
+                  id: btn_l3
+                  x: 0
+                  y: 252
+                  width: 288
+                  height: 96
+                  checkable: true
+                  widgets: [label: { x: 20, align: LEFT_MID, text: "${light_3_name}", text_font: montserrat_20 }]
+                  on_short_click: [homeassistant.action: { action: light.toggle, data: { entity_id: "${light_3}" } }]
+              - button:
+                  id: btn_l4
+                  x: 0
+                  y: 356
+                  width: 288
+                  height: 96
+                  checkable: true
+                  widgets: [label: { x: 20, align: LEFT_MID, text: "${light_4_name}", text_font: montserrat_20 }]
+                  on_short_click: [homeassistant.action: { action: light.toggle, data: { entity_id: "${light_4}" } }]
+
+        # ---------------- climate
+        - obj:
+            styles: card
+            x: 352
+            y: 100
+            width: 320
+            height: 484
+            scrollable: false
+            widgets:
+              - label: { x: 0, y: 0, text: "\U000F050F", text_font: mdi_24, text_color: 0xFF7A45 }
+              - label: { x: 32, y: 5, text: "CLIMATE", text_font: montserrat_14, text_color: 0xFF7A45 }
+              - label: { x: 0, y: 40, text: "${climate_name}", text_font: montserrat_20, styles: dim }
+              - label: { id: lbl_clim_target, y: 120, align: TOP_MID, text: "--", text_font: montserrat_48 }
+              - label: { id: lbl_clim_now, y: 196, align: TOP_MID, text: "", text_font: montserrat_20, styles: dim }
+              - label: { id: lbl_clim_action, y: 230, align: TOP_MID, text: "", text_font: montserrat_18, styles: dim }
+              - button:
+                  x: 0
+                  y: 356
+                  width: 136
+                  height: 96
+                  widgets: [label: { align: CENTER, text: "", text_font: montserrat_32 }]
+                  on_short_click: [script.execute: { id: climate_step, dir: -1 }]
+              - button:
+                  x: 152
+                  y: 356
+                  width: 136
+                  height: 96
+                  widgets: [label: { align: CENTER, text: "", text_font: montserrat_32 }]
+                  on_short_click: [script.execute: { id: climate_step, dir: 1 }]
+
+        # ---------------- media
+        - obj:
+            styles: card
+            x: 688
+            y: 100
+            width: 320
+            height: 484
+            scrollable: false
+            widgets:
+              - label: { x: 0, y: 0, text: "\U000F075A", text_font: mdi_24, text_color: 0x9B8CFF }
+              - label: { x: 32, y: 5, text: "MEDIA", text_font: montserrat_14, text_color: 0x9B8CFF }
+              - label: { x: 0, y: 40, text: "${media_name}", text_font: montserrat_20, styles: dim }
+              # Labels with long_mode DOT need a fixed height, or LVGL wraps them onto more lines.
+              - label: { id: lbl_media_title, x: 0, y: 140, width: 288, height: 30, long_mode: DOT, text: "Nothing playing", text_font: montserrat_24 }
+              - label: { id: lbl_media_artist, x: 0, y: 178, width: 288, height: 24, long_mode: DOT, text: "", text_font: montserrat_18, styles: dim }
+              - button:
+                  x: 0
+                  y: 250
+                  width: 88
+                  height: 80
+                  widgets: [label: { align: CENTER, text: "", text_font: montserrat_24 }]
+                  on_short_click: [homeassistant.action: { action: media_player.media_previous_track, data: { entity_id: "${media}" } }]
+              - button:
+                  x: 100
+                  y: 250
+                  width: 88
+                  height: 80
+                  widgets: [label: { id: lbl_play, align: CENTER, text: "", text_font: montserrat_24 }]
+                  on_short_click: [homeassistant.action: { action: media_player.media_play_pause, data: { entity_id: "${media}" } }]
+              - button:
+                  x: 200
+                  y: 250
+                  width: 88
+                  height: 80
+                  widgets: [label: { align: CENTER, text: "", text_font: montserrat_24 }]
+                  on_short_click: [homeassistant.action: { action: media_player.media_next_track, data: { entity_id: "${media}" } }]
+              - label: { x: 0, y: 372, text: "Volume", text_font: montserrat_18, styles: dim }
+              - slider:
+                  id: sld_volume
+                  x: 0
+                  y: 404
+                  width: 288
+                  height: 48
+                  min_value: 0
+                  max_value: 100
+                  on_release:
+                    - homeassistant.action:
+                        action: media_player.volume_set
+                        data:
+                          entity_id: ${media}
+                          volume_level: !lambda 'char b[8]; snprintf(b, sizeof b, "%.2f", x / 100.0f); return std::string(b);'

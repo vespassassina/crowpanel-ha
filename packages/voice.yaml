@@ -1,0 +1,110 @@
+# Home Assistant voice satellite: wake word on the panel, speech-to-text, intent and
+# text-to-speech in HA's Assist pipeline. Needs audio.yaml.
+#
+# The main config must define a script `voice_ui`; it runs whenever `voice_phase` or the
+# mute switch changes, so the screen can show what the assistant is doing. A config without
+# a screen can make it a stub (examples/minimal.yaml).
+
+substitutions:
+  wake_word: okay_nabu
+  # The mic is quiet: Elecrow's own samples multiply it by 10. 8 works for the wake word
+  # and for speech-to-text at a few metres.
+  mic_gain: "8"
+
+globals:
+  # 0 idle, 1 listening, 2 thinking, 3 replying.
+  - { id: voice_phase, type: int, initial_value: "0" }
+
+micro_wake_word:
+  id: mww
+  microphone:
+    microphone: panel_mic
+    gain_factor: ${mic_gain}
+  models:
+    - model: ${wake_word}
+  on_wake_word_detected:
+    - voice_assistant.start:
+        wake_word: !lambda return wake_word;
+
+voice_assistant:
+  id: va
+  microphone:
+    microphone: panel_mic
+    gain_factor: ${mic_gain}
+  media_player: panel_media
+  micro_wake_word: mww
+  noise_suppression_level: 2
+  auto_gain: 31dBFS
+  on_client_connected:
+    - if:
+        condition:
+          switch.is_off: mute
+        then:
+          - micro_wake_word.start:
+  on_client_disconnected:
+    - voice_assistant.stop:
+    - micro_wake_word.stop:
+  on_listening:
+    - lambda: id(voice_phase) = 1;
+    - script.execute: voice_ui
+    - light.turn_on: backlight
+  on_stt_vad_end:
+    - lambda: id(voice_phase) = 2;
+    - script.execute: voice_ui
+  on_tts_start:
+    - lambda: id(voice_phase) = 3;
+    - script.execute: voice_ui
+  on_end:
+    # Wait for the spoken reply to finish.
+    - wait_until:
+        condition:
+          media_player.is_announcing: panel_media
+        timeout: 1s
+    - wait_until:
+        not:
+          media_player.is_announcing: panel_media
+    - lambda: id(voice_phase) = 0;
+    - script.execute: voice_ui
+    # on_end fires before the assistant reports idle. Start the wake word too early and
+    # the start is skipped, and the panel stops listening for good.
+    - wait_until:
+        condition:
+          not: voice_assistant.is_running
+        timeout: 10s
+    - if:
+        condition:
+          switch.is_off: mute
+        then:
+          - micro_wake_word.start:
+  on_error:
+    - logger.log:
+        format: "voice error %s: %s"
+        args: [code.c_str(), message.c_str()]
+    - lambda: id(voice_phase) = 0;
+    - script.execute: voice_ui
+  # "Set a timer for 5 minutes": HA keeps the timer, the panel rings.
+  on_timer_finished:
+    - light.turn_on: backlight
+    - repeat:
+        count: 3
+        then:
+          - media_player.speaker.play_on_device_media_file:
+              media_file: timer_sound
+              announcement: true
+          - delay: 2s
+
+switch:
+  # Mute: the wake word stops and nothing listens until it is off again.
+  - platform: template
+    id: mute
+    name: Mute
+    icon: mdi:microphone-off
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+      - voice_assistant.stop:
+      - micro_wake_word.stop:
+      - script.execute: voice_ui
+    on_turn_off:
+      - micro_wake_word.start:
+      - script.execute: voice_ui

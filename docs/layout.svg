@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 600" width="1024" height="600" font-family="Montserrat, Helvetica, Arial, sans-serif">
+  <!-- Drawing of the example dashboard at the panel's 1024 x 600, same coordinates as crowpanel-ha.yaml. -->
+  <rect width="1024" height="600" fill="#0D0F14"/>
+
+  <!-- top bar -->
+  <text x="22" y="66" font-size="64" font-weight="300" fill="#E8EAF0">21:42</text>
+  <text x="200" y="44" font-size="20" fill="#8B91A3">Monday</text>
+  <text x="200" y="68" font-size="20" fill="#8B91A3">26 October</text>
+  <rect x="560" y="26" width="180" height="44" rx="22" fill="#171A22"/>
+  <circle cx="584" cy="48" r="7" fill="#4CD98A"/>
+  <text x="604" y="54" font-size="18" fill="#E8EAF0">Listening</text>
+  <circle cx="864" cy="44" r="16" fill="#FFC94A"/>
+  <text x="1002" y="58" font-size="32" fill="#E8EAF0" text-anchor="end">14°</text>
+
+  <!-- lights -->
+  <rect x="16" y="100" width="320" height="484" rx="20" fill="#171A22"/>
+  <text x="32" y="134" font-size="14" fill="#FFB547" letter-spacing="1">LIGHTS</text>
+  <rect x="32" y="160" width="288" height="96" rx="14" fill="#FFB547"/>
+  <text x="52" y="215" font-size="20" fill="#0D0F14">Living room</text>
+  <rect x="32" y="264" width="288" height="96" rx="14" fill="#FFFFFF" fill-opacity="0.1"/>
+  <text x="52" y="319" font-size="20" fill="#E8EAF0">Kitchen</text>
+  <rect x="32" y="368" width="288" height="96" rx="14" fill="#FFB547"/>
+  <text x="52" y="423" font-size="20" fill="#0D0F14">Hallway</text>
+  <rect x="32" y="472" width="288" height="96" rx="14" fill="#FFFFFF" fill-opacity="0.1"/>
+  <text x="52" y="527" font-size="20" fill="#E8EAF0">Bedroom</text>
+
+  <!-- climate -->
+  <rect x="352" y="100" width="320" height="484" rx="20" fill="#171A22"/>
+  <text x="368" y="134" font-size="14" fill="#FF7A45" letter-spacing="1">CLIMATE</text>
+  <text x="368" y="176" font-size="20" fill="#8B91A3">Living room</text>
+  <text x="512" y="282" font-size="48" fill="#FF7A45" text-anchor="middle">21.0°</text>
+  <text x="512" y="328" font-size="20" fill="#8B91A3" text-anchor="middle">Now 20.4°</text>
+  <text x="512" y="360" font-size="18" fill="#8B91A3" text-anchor="middle">Heating</text>
+  <rect x="368" y="472" width="136" height="96" rx="14" fill="#FFFFFF" fill-opacity="0.1"/>
+  <text x="436" y="532" font-size="32" fill="#E8EAF0" text-anchor="middle">−</text>
+  <rect x="520" y="472" width="136" height="96" rx="14" fill="#FFFFFF" fill-opacity="0.1"/>
+  <text x="588" y="532" font-size="32" fill="#E8EAF0" text-anchor="middle">+</text>
+
+  <!-- media -->
+  <rect x="688" y="100" width="320" height="484" rx="20" fill="#171A22"/>
+  <text x="704" y="134" font-size="14" fill="#9B8CFF" letter-spacing="1">MEDIA</text>
+  <text x="704" y="176" font-size="20" fill="#8B91A3">Living room</text>
+  <text x="704" y="280" font-size="24" fill="#E8EAF0">So What</text>
+  <text x="704" y="312" font-size="18" fill="#8B91A3">Miles Davis</text>
+  <rect x="704" y="366" width="88" height="80" rx="14" fill="#FFFFFF" fill-opacity="0.1"/>
+  <path d="M736 394 v24 M760 394 l-18 12 l18 12 z" stroke="#E8EAF0" stroke-width="3" fill="#E8EAF0"/>
+  <rect x="804" y="366" width="88" height="80" rx="14" fill="#FFFFFF" fill-opacity="0.1"/>
+  <path d="M840 394 v24 M856 394 v24" stroke="#E8EAF0" stroke-width="5"/>
+  <rect x="904" y="366" width="88" height="80" rx="14" fill="#FFFFFF" fill-opacity="0.1"/>
+  <path d="M960 394 v24 M936 394 l18 12 l-18 12 z" stroke="#E8EAF0" stroke-width="3" fill="#E8EAF0"/>
+  <text x="704" y="506" font-size="18" fill="#8B91A3">Volume</text>
+  <rect x="704" y="520" width="288" height="48" rx="14" fill="#FFFFFF" fill-opacity="0.08"/>
+  <rect x="704" y="520" width="130" height="48" rx="14" fill="#9B8CFF" fill-opacity="0.7"/>
+</svg>

@@ -1,0 +1,115 @@
+# Speaker and microphone, straight on the P4's I2S.
+# The board also carries an ES8311/ES7210 codec, but on HW V1.2 its I2S lines sit behind
+# unfitted resistors. The P4 drives an NS4168 amplifier and a PDM MEMS mic directly.
+
+esphome:
+  on_boot:
+    priority: -100
+    then:
+      - microphone.capture: panel_mic  # keeps the Mic Level sensor alive while nothing listens
+
+i2s_audio:
+  - id: i2s_spk
+    i2s_lrclk_pin: GPIO21
+    i2s_bclk_pin: GPIO22
+  # PDM: the clock goes out on the word-select pin. GPIO24 is also the native
+  # USB-Serial-JTAG; harmless while logs go over the CH340 port (J1).
+  - id: i2s_mic
+    i2s_lrclk_pin: GPIO24
+
+speaker:
+  - platform: i2s_audio
+    id: panel_speaker
+    i2s_audio_id: i2s_spk
+    i2s_dout_pin: GPIO23
+    dac_type: external
+    channel: mono
+
+microphone:
+  - platform: i2s_audio
+    id: panel_mic
+    i2s_audio_id: i2s_mic
+    i2s_din_pin: GPIO26
+    adc_type: external
+    pdm: true
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    channel: left  # the right channel is noise; there is one mic
+    correct_dc_offset: true
+    on_data:
+      - lambda: |-
+          // Running RMS of the 16-bit samples, read by the Mic Level sensor.
+          const int16_t *s = reinterpret_cast<const int16_t *>(x.data());
+          const size_t n = x.size() / 2;
+          if (n == 0) return;
+          double sum = 0;
+          for (size_t i = 0; i < n; i++) sum += (double) s[i] * s[i];
+          id(mic_sum) += sum;
+          id(mic_count) += n;
+
+globals:
+  - { id: mic_sum, type: double, initial_value: "0" }
+  - { id: mic_count, type: uint32_t, initial_value: "0" }
+
+sensor:
+  # Loudness at the mic, for checking it works and for tuning the gain.
+  - platform: template
+    id: mic_level
+    name: Mic Level
+    unit_of_measurement: dBFS
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: 1s
+    lambda: |-
+      if (id(mic_count) == 0) return NAN;
+      float rms = sqrt(id(mic_sum) / id(mic_count));
+      id(mic_sum) = 0;
+      id(mic_count) = 0;
+      return 20 * log10(std::max(rms, 1.0f) / 32768.0f);
+    filters:
+      - delta: 2
+
+# Plays TTS replies, announcements and anything HA sends to it.
+media_player:
+  - platform: speaker
+    id: panel_media
+    name: Speaker
+    volume_initial: 0.5
+    announcement_pipeline:
+      speaker: panel_speaker
+      format: FLAC
+      num_channels: 1
+    files:
+      - id: timer_sound
+        file: https://github.com/esphome/home-assistant-voice-pe/raw/dev/sounds/timer_finished.flac
+    # The amp hisses when left on, so it is on only while sound plays.
+    on_play:
+      - switch.turn_on: speaker_amp
+    on_announcement:
+      - switch.turn_on: speaker_amp
+    on_idle:
+      - delay: 500ms
+      - if:
+          condition:
+            media_player.is_idle: panel_media
+          then:
+            - switch.turn_off: speaker_amp
+
+switch:
+  - platform: gpio
+    id: speaker_amp
+    name: Speaker Amp
+    entity_category: diagnostic
+    restore_mode: ALWAYS_OFF
+    pin:
+      number: GPIO30
+      inverted: true  # low enables the NS4168
+  # GPIO20 is labelled "Mic R-L" in some Elecrow samples, which drive it high. High adds
+  # noise and the mic stops responding; low gives the cleanest signal. Keep it off.
+  - platform: gpio
+    id: mic_select
+    name: Mic Select
+    entity_category: diagnostic
+    disabled_by_default: true
+    restore_mode: ALWAYS_OFF
+    pin: GPIO20
